@@ -89,8 +89,6 @@ def hierarchy_dist(synset_1, synset_2):
         h_dist = max([x[1] for x in synset_1.hypernym_distances()])
     else:
         # find the max depth of least common subsumer
-        root_dis_1 = max([x[1] for x in synset_1.hypernym_distances()])
-        root_dis_2 = max([x[1] for x in synset_2.hypernym_distances()])
 
         hypernyms_1 = {x[0]:x[1] for x in synset_1.hypernym_distances()}
         hypernyms_2 = {x[0]:x[1] for x in synset_2.hypernym_distances()}
@@ -168,15 +166,13 @@ def info_content(lookup_word):
     n = 0 if not brown_freqs.has_key(lookup_word) else brown_freqs[lookup_word]
     return 1.0 - (math.log(n + 1) / math.log(N + 1))
     
-def semantic_vector(words, joint_words, info_content_norm):
+def semantic_vector(words, joint_words):
     """
     Computes the semantic vector of a sentence. The sentence is passed in as
     a collection of words. The size of the semantic vector is the same as the
     size of the joint word set. The elements are 1 if a word in the sentence
     already exists in the joint word set, or the similarity of the word to the
-    most similar word in the joint word set if it doesn't. Both values are 
-    further normalized by the word's (and similar word's) information content
-    if info_content_norm is True.
+    most similar word in the joint word set if it doesn't.
     """
     sent_set = set(words)
     print "w:", words
@@ -187,20 +183,16 @@ def semantic_vector(words, joint_words, info_content_norm):
         if joint_word in sent_set:
             # if word in union exists in the sentence, s(i) = 1 (unnormalized)
             semvec[i] = 1.0
-            if info_content_norm:
-                semvec[i] = semvec[i] * math.pow(info_content(joint_word), 2)
             print joint_word, "->", joint_word
         else:
             # find the most similar word in the joint set and set the sim value
             sim_word, max_sim = most_similar_word(joint_word, sent_set)
             semvec[i] = max_sim if max_sim > PHI else 0.0
             print joint_word, "->", sim_word, ":", max_sim, ":", semvec[i]
-            if info_content_norm:
-                semvec[i] = semvec[i] * info_content(joint_word) * info_content(sim_word)
         i = i + 1
     return semvec                
             
-def semantic_similarity(sentence_1, sentence_2, info_content_norm):
+def semantic_similarity(sentence_1, sentence_2):
     """
     Computes the semantic similarity between two sentences as the cosine
     similarity between the semantic vectors computed for each sentence.
@@ -208,8 +200,8 @@ def semantic_similarity(sentence_1, sentence_2, info_content_norm):
     words_1 = nltk.word_tokenize(sentence_1)
     words_2 = nltk.word_tokenize(sentence_2)
     joint_words = set(words_1).union(set(words_2))
-    vec_1 = semantic_vector(words_1, joint_words, info_content_norm)
-    vec_2 = semantic_vector(words_2, joint_words, info_content_norm)
+    vec_1 = semantic_vector(words_1, joint_words)
+    vec_2 = semantic_vector(words_2, joint_words)
     print "vec_1:", vec_1
     print "vec_2:", vec_2
     return np.dot(vec_1, vec_2.T) / (np.linalg.norm(vec_1) * np.linalg.norm(vec_2))
@@ -260,13 +252,13 @@ def word_order_similarity(sentence_1, sentence_2):
 
 ######################### overall similarity ##########################
 
-def similarity(sentence_1, sentence_2, info_content_norm):
+def similarity(sentence_1, sentence_2):
     """
     Calculate the semantic similarity between two sentences. The last 
     parameter is True or False depending on whether information content
     normalization is desired or not.
     """
-    return DELTA * semantic_similarity(sentence_1, sentence_2, info_content_norm) + \
+    return DELTA * semantic_similarity(sentence_1, sentence_2) + \
         (1.0 - DELTA) * word_order_similarity(sentence_1, sentence_2)
         
 ######################### main / test ##########################
@@ -334,6 +326,4 @@ st1 = "RAM keeps things being worked with"
 st2 = "The CPU uses RAM as a short-term memory store"
 #raw_input("sentence2:")
 
-print "%s\t%s\t%f" % (st1, st2, 
-        similarity(st1, st2, False))
-#        similarity(st1, st2, True))
+print "%s\t%s\t%f" % (st1, st2, similarity(st1, st2))
