@@ -4,7 +4,6 @@
 # Results achieved are NOT identical to that reported in the paper, but
 # this is very likely due to the differences in the way the algorithm was
 # described in the paper and how I implemented it.
-from __future__ import division
 import nltk
 from nltk.corpus import wordnet as wn
 from nltk.corpus import brown
@@ -22,6 +21,15 @@ DELTA = 0.85
 
 brown_freqs = dict()
 N = 0
+probe_text = ""
+
+def _dedup_wo(seq):
+    seen = set()
+    seen_add = seen.add
+    return [x for x in seq if not (x in seen or seen_add(x))]
+
+def _joint(words_1, words_2):
+    return _dedup_wo(words_1 + words_2)
 
 ######################### word similarity ##########################
 
@@ -93,12 +101,9 @@ def hierarchy_dist(synset_1, synset_2):
         hypernyms_1 = {x[0]:x[1] for x in synset_1.hypernym_distances()}
         hypernyms_2 = {x[0]:x[1] for x in synset_2.hypernym_distances()}
 
-        #print "dump hyper nyms"
-        #print "--", root_dis_1, hypernyms_1
-        #print "--",root_dis_2, hypernyms_2
         lcs_candidates = set(hypernyms_1.keys()).intersection(
             set(hypernyms_2.keys()))
-        #print "--", lcs_candidates
+
         if len(lcs_candidates) > 0:
             subsumer = None
             subsumer_dis = sys.maxint
@@ -110,13 +115,11 @@ def hierarchy_dist(synset_1, synset_2):
                 if hypernyms_2.has_key(lcs_candidate):
                     lcs_d2 = hypernyms_2[lcs_candidate]
                 lcs_d = lcs_d1 + lcs_d2
-                #print lcs_candidate, lcs_d1, lcs_d2, subsumer_dis
                 if lcs_d < subsumer_dis:
                     subsumer_dis = lcs_d
                     subsumer = lcs_candidate
 
             h_dist = subsumer.max_depth()
-            #print "subsumer:", subsumer, h_dist, subsumer.hypernym_paths()
         else:
             h_dist = 0
     return ((math.exp(BETA * h_dist) - math.exp(-BETA * h_dist)) / 
@@ -140,7 +143,6 @@ def most_similar_word(word, word_set):
     sim_word = ""
     for ref_word in word_set:
       sim = word_similarity(word, ref_word)
-      #print "cmp:", word, "->", ref_word, ":", sim
       if sim > max_sim:
           max_sim = sim
           sim_word = ref_word
@@ -174,24 +176,57 @@ def semantic_vector(words, joint_words):
     already exists in the joint word set, or the similarity of the word to the
     most similar word in the joint word set if it doesn't.
     """
-    sent_set = set(words)
-    print "w:", words
-    print "joint", joint_words
+    sent_set = _dedup_wo(words)
     semvec = np.zeros(len(joint_words))
     i = 0
+    res = {}
+    for w in sent_set:
+        res[w] = {}
+
     for joint_word in joint_words:
         if joint_word in sent_set:
             # if word in union exists in the sentence, s(i) = 1 (unnormalized)
-            semvec[i] = 1.0
-            print joint_word, "->", joint_word
+            semvec[i] = math.pow(info_content(joint_word), 2)
+            res[joint_word][joint_word] = semvec[i]
         else:
             # find the most similar word in the joint set and set the sim value
             sim_word, max_sim = most_similar_word(joint_word, sent_set)
             semvec[i] = max_sim if max_sim > PHI else 0.0
-            print joint_word, "->", sim_word, ":", max_sim, ":", semvec[i]
+            res[sim_word][joint_word] = semvec[i] * info_content(joint_word) * info_content(sim_word)
         i = i + 1
+
+    info_probe("semantic vector: ", words, joint_words, res)
     return semvec                
-            
+
+def get_probe_info():
+    global probe_text
+    return probe_text
+
+def info_probe(title, words, joint_words, res):
+    global probe_text
+    SPACE= "</td><td>"
+    LS = "<tr><td></td><td>"
+    LSR = "<tr><td>"
+    LE = "</td></td>"
+    probe_text += "<div><strong>" + title + "</strong>" + " ".join(words) + "</div>"
+    probe_text += "<table>"
+    probe_text +=  LS+SPACE.join(joint_words)+LE
+    for w in words:
+        line = [LSR + w] 
+        for c in joint_words:
+            if c in res[w]:
+                line.append(str(res[w][c]) if res[w][c] == 1 or res[w][c] == 0 else str("{:.4f}".format(res[w][c])))
+            else:
+                line.append("")
+
+        probe_text += SPACE.join(line) + LE
+
+    probe_text += "</table>"
+
+def line_probe(c):
+    global probe_text
+    probe_text += "<div><strong> vector:</strong>" + str(c) + "</div>"
+
 def semantic_similarity(sentence_1, sentence_2):
     """
     Computes the semantic similarity between two sentences as the cosine
@@ -199,11 +234,11 @@ def semantic_similarity(sentence_1, sentence_2):
     """
     words_1 = nltk.word_tokenize(sentence_1)
     words_2 = nltk.word_tokenize(sentence_2)
-    joint_words = set(words_1).union(set(words_2))
+    joint_words = _joint(words_1, words_2);
     vec_1 = semantic_vector(words_1, joint_words)
+    line_probe(vec_1)
     vec_2 = semantic_vector(words_2, joint_words)
-    print "vec_1:", vec_1
-    print "vec_2:", vec_2
+    line_probe(vec_2)
     return np.dot(vec_1, vec_2.T) / (np.linalg.norm(vec_1) * np.linalg.norm(vec_2))
 
 ######################### word order similarity ##########################
@@ -221,11 +256,16 @@ def word_order_vector(words, joint_words, windex):
     """
     wovec = np.zeros(len(joint_words))
     i = 0
-    wordset = set(words)
+    wordset = _dedup_wo(words)
+    res = {}
+    for w in wordset:
+        res[w] = {}
+
     for joint_word in joint_words:
         if joint_word in wordset:
             # word in joint_words found in sentence, just populate the index
             wovec[i] = windex[joint_word]
+            res[joint_word][joint_word] = wovec[i]
         else:
             # word not in joint_words, find most similar word and populate
             # word_vector with the thresholded similarity
@@ -234,7 +274,11 @@ def word_order_vector(words, joint_words, windex):
                 wovec[i] = windex[sim_word]
             else:
                 wovec[i] = 0
+
+            res[sim_word][joint_word] = wovec[i]
         i = i + 1
+
+    info_probe("word order vector: ", words, joint_words, res)
     return wovec
 
 def word_order_similarity(sentence_1, sentence_2):
@@ -244,10 +288,12 @@ def word_order_similarity(sentence_1, sentence_2):
     """
     words_1 = nltk.word_tokenize(sentence_1)
     words_2 = nltk.word_tokenize(sentence_2)
-    joint_words = list(set(words_1).union(set(words_2)))
+    joint_words = _joint(words_1, words_2);
     windex = {x[1]: x[0] for x in enumerate(joint_words)}
     r1 = word_order_vector(words_1, joint_words, windex)
+    line_probe(r1)
     r2 = word_order_vector(words_2, joint_words, windex)
+    line_probe(r2)
     return 1.0 - (np.linalg.norm(r1 - r2) / np.linalg.norm(r1 + r2))
 
 ######################### overall similarity ##########################
@@ -297,9 +343,6 @@ word_pairs = [
   ["oracle", "sage", 0.43],
   ["serf", "slave", 0.39]
 ]
-for word_pair in word_pairs:
-    print "%s\t%s\t%.2f\t%.2f" % (word_pair[0], word_pair[1], word_pair[2], 
-                                  word_similarity(word_pair[0], word_pair[1]))
 
 sentence_pairs = [
     ["I like that bachelor.", "I like that unmarried man.", 0.561],
@@ -317,13 +360,14 @@ sentence_pairs = [
     ["I have a pen.", "Where do you live?", 0.0],
     ["I have a pen.", "Where is ink?", 0.129],
     ["I have a hammer.", "Take some nails.", 0.508],
-    ["I have a hammer.", "Take some apples.", 0.121]
-]
-#for sent_pair in sentence_pairs:
+    ["I have a hammer.", "Take some apples.", 0.121],
+    ["RAM keeps things being worked with","The CPU uses RAM as a short-term memory store", 0.5522]
+    ]
 
-st1 = "RAM keeps things being worked with"
-#raw_input("sentence1:")
-st2 = "The CPU uses RAM as a short-term memory store"
-#raw_input("sentence2:")
+if __name__ == '__main__':
+    for word_pair in word_pairs:
+        print "%s\t%s\t%.2f\t%.2f" % (word_pair[0], word_pair[1], word_pair[2], 
+                                  word_similarity(word_pair[0], word_pair[1]))
+    for sent_pair in sentence_pairs:
+        print "%s\t%s\t%f\t%f" % (sent_pair[0], sent_pair[1], sent_pair[2], similarity(sent_pair[0], sent_pair[1]))
 
-print "%s\t%s\t%f" % (st1, st2, similarity(st1, st2))
