@@ -10,6 +10,7 @@ from nltk.corpus import brown
 import math
 import numpy as np
 import sys
+import multiprocessing
 
 # Parameters to the algorithm. Currently set to values that was reported
 # in the paper to produce "best" results.
@@ -23,6 +24,8 @@ brown_freqs = dict()
 N = 0
 probe_text = ""
 INFO_PROBE = 0
+
+lock = multiprocessing.Lock()
 
 def _dedup_wo(seq):
     seen = set()
@@ -43,8 +46,9 @@ def get_best_synset_pair(word_1, word_2):
     """
     global synset_pair_cache
     max_sim = -1.0
-    synsets_1 = wn.synsets(word_1, pos=wn.NOUN)
-    synsets_2 = wn.synsets(word_2, pos=wn.NOUN)
+    with lock:
+        synsets_1 = wn.synsets(word_1, pos=wn.NOUN)
+        synsets_2 = wn.synsets(word_2, pos=wn.NOUN)
 
     #print "w1:", word_1, synsets_1
     #print "w2:", word_2, synsets_2
@@ -55,8 +59,9 @@ def get_best_synset_pair(word_1, word_2):
         best_pair = None, None
         for synset_1 in synsets_1:
             for synset_2 in synsets_2:
-               sim = wn.path_similarity(synset_1, synset_2)
-               if sim > max_sim:
+                with lock:
+                    sim = wn.path_similarity(synset_1, synset_2)
+                if sim > max_sim:
                    max_sim = sim
                    best_pair = synset_1, synset_2
         return best_pair
@@ -151,23 +156,23 @@ def most_similar_word(word, word_set):
           max_sim = sim
           sim_word = ref_word
     return sim_word, max_sim
-    
+   
+def init():
+    global N
+    for sent in brown.sents():
+        for word in sent:
+            word = word.lower()
+            if not brown_freqs.has_key(word):
+                brown_freqs[word] = 0
+            brown_freqs[word] = brown_freqs[word] + 1
+            N = N + 1
+
 def info_content(lookup_word):
     """
     Uses the Brown corpus available in NLTK to calculate a Laplace
     smoothed frequency distribution of words, then uses this information
     to compute the information content of the lookup_word.
     """
-    global N
-    if N == 0:
-        # poor man's lazy evaluation
-        for sent in brown.sents():
-            for word in sent:
-                word = word.lower()
-                if not brown_freqs.has_key(word):
-                    brown_freqs[word] = 0
-                brown_freqs[word] = brown_freqs[word] + 1
-                N = N + 1
     lookup_word = lookup_word.lower()
     n = 0 if not brown_freqs.has_key(lookup_word) else brown_freqs[lookup_word]
     return 1.0 - (math.log(n + 1) / math.log(N + 1))
