@@ -22,6 +22,7 @@ DELTA = 0.85
 brown_freqs = dict()
 N = 0
 probe_text = ""
+INFO_PROBE = 0
 
 def _dedup_wo(seq):
     seen = set()
@@ -33,14 +34,17 @@ def _joint(words_1, words_2):
 
 ######################### word similarity ##########################
 
+synset_pair_cache = dict()
+
 def get_best_synset_pair(word_1, word_2):
     """ 
     Choose the pair with highest path similarity among all pairs. 
     Mimics pattern-seeking behavior of humans.
     """
+    global synset_pair_cache
     max_sim = -1.0
-    synsets_1 = wn.synsets(word_1)
-    synsets_2 = wn.synsets(word_2)
+    synsets_1 = wn.synsets(word_1, pos=wn.NOUN)
+    synsets_2 = wn.synsets(word_2, pos=wn.NOUN)
 
     #print "w1:", word_1, synsets_1
     #print "w2:", word_2, synsets_2
@@ -203,6 +207,9 @@ def get_probe_info():
     return probe_text
 
 def info_probe(title, words, joint_words, res):
+    if INFO_PROBE == 0:
+        return
+
     global probe_text
     SPACE= "</td><td>"
     LS = "<tr><td></td><td>"
@@ -224,6 +231,8 @@ def info_probe(title, words, joint_words, res):
     probe_text += "</table>"
 
 def line_probe(c):
+    if INFO_PROBE == 0:
+        return
     global probe_text
     probe_text += "<div><strong> vector:</strong>" + str(c) + "</div>"
 
